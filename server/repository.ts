@@ -13,6 +13,11 @@ export interface PostRepository {
   list(): Post[]
   /** 把动态插到列表最前 */
   add(post: Post): void
+  /**
+   * 按 ID 就地改写一条动态：命中时用 `change` 返回的对象原位替换（顺序不变）并返回它，
+   * 未命中返回 null。供点赞/收藏这类只改局部状态的场景使用，调用方拿不到内部数组。
+   */
+  update(id: string, change: (post: Post) => Post): Post | null
   /** 删除指定 ID 的动态，返回是否删除成功 */
   remove(id: string): boolean
   /** 清空全部动态 */
@@ -39,6 +44,15 @@ export function createPostRepository(options: PostRepositoryOptions = {}): PostR
     add(post) {
       // 存入副本，避免调用方之后修改原对象影响存储
       posts.unshift({ ...post })
+    },
+    update(id, change) {
+      const index = posts.findIndex((post) => post.id === id)
+      if (index === -1) return null
+
+      // 原位替换保持列表顺序，change 返回同一引用时也不破坏原有数据
+      const updated = change(posts[index]!)
+      posts[index] = updated
+      return updated
     },
     remove(id) {
       const index = posts.findIndex((post) => post.id === id)

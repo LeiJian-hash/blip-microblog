@@ -1,8 +1,15 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { HTTPException } from 'hono/http-exception'
-import type { PostDraft } from '../src/domain/post.js'
-import { createPost, normalizeDraft, validateDraft } from '../src/domain/post.js'
+import type { Context } from 'hono'
+import type { Post, PostDraft } from '../src/domain/post.js'
+import {
+  createPost,
+  normalizeDraft,
+  setFavorited,
+  setLiked,
+  validateDraft,
+} from '../src/domain/post.js'
 import type { PostRepository } from './repository.js'
 
 export interface CreateAppOptions {
@@ -17,6 +24,23 @@ function toBody(payload: unknown): Record<string, unknown> {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return {}
 
   return payload as Record<string, unknown>
+}
+
+/** 点赞/收藏四条路由共用：取 ID、套用领域函数、决定状态码与响应体 */
+function applyReaction(
+  c: Context,
+  repository: PostRepository,
+  change: (post: Post) => Post,
+): Response {
+  const id = c.req.param('id')
+  // 路径参数缺失时同样按“动态不存在”处理，不把 undefined 交给仓储
+  if (!id) return c.json({ error: '动态不存在' }, 404)
+
+  const post = repository.update(id, change)
+
+  if (!post) return c.json({ error: '动态不存在' }, 404)
+
+  return c.json({ post }, 200)
 }
 
 /** 创建 Hono 应用，只负责 HTTP 层，业务校验复用领域模块 */
@@ -82,6 +106,23 @@ export function createApp({ repository }: CreateAppOptions): Hono {
 
     return c.body(null, 204)
   })
+
+  // 点赞/收藏都做成幂等的“设为某状态”，重复调用不会重复计数
+  app.put('/api/posts/:id/like', (c) =>
+    applyReaction(c, repository, (post) => setLiked(post, true)),
+  )
+
+  app.delete('/api/posts/:id/like', (c) =>
+    applyReaction(c, repository, (post) => setLiked(post, false)),
+  )
+
+  app.put('/api/posts/:id/favorite', (c) =>
+    applyReaction(c, repository, (post) => setFavorited(post, true)),
+  )
+
+  app.delete('/api/posts/:id/favorite', (c) =>
+    applyReaction(c, repository, (post) => setFavorited(post, false)),
+  )
 
   app.delete('/api/posts', (c) => {
     repository.clear()
