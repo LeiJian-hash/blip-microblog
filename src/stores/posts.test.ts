@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { MAX_CONTENT_LENGTH, type Post } from '@/domain/post'
-import { ApiError, clearPosts, createPost, deletePost, fetchPosts } from '@/api/posts'
+import { EMPTY_REACTIONS, MAX_CONTENT_LENGTH, type Post } from '@/domain/post'
+import {
+  ApiError,
+  clearPosts,
+  createPost,
+  deletePost,
+  fetchPosts,
+  setPostFavorited,
+  setPostLiked,
+} from '@/api/posts'
 import { AUTHOR_KEY } from '@/lib/storage'
 import { usePostsStore } from './posts'
 
@@ -15,6 +23,8 @@ vi.mock('@/api/posts', async (importOriginal) => {
     createPost: vi.fn(),
     deletePost: vi.fn(),
     clearPosts: vi.fn(),
+    setPostLiked: vi.fn(),
+    setPostFavorited: vi.fn(),
   }
 })
 
@@ -22,6 +32,8 @@ const mockedFetchPosts = vi.mocked(fetchPosts)
 const mockedCreatePost = vi.mocked(createPost)
 const mockedDeletePost = vi.mocked(deletePost)
 const mockedClearPosts = vi.mocked(clearPosts)
+const mockedSetPostLiked = vi.mocked(setPostLiked)
+const mockedSetPostFavorited = vi.mocked(setPostFavorited)
 
 function createFakePost(overrides: Partial<Post> = {}): Post {
   return {
@@ -29,6 +41,7 @@ function createFakePost(overrides: Partial<Post> = {}): Post {
     author: '阿蓝',
     content: '你好',
     createdAt: 1_700_000_000_000,
+    ...EMPTY_REACTIONS,
     ...overrides,
   }
 }
@@ -305,6 +318,151 @@ describe('usePostsStore', () => {
 
     expect(store.posts.map((post) => post.id)).toEqual(['keep'])
     expect(store.error).toBeNull()
+  })
+
+  it('toggleLike 用服务端返回的动态替换该条目并保持顺序', async () => {
+    const liked = createFakePost({ id: 'a', content: '被赞的', likes: 1, liked: true })
+    mockedSetPostLiked.mockResolvedValue(liked)
+
+    const store = usePostsStore()
+    const first = createFakePost({ id: 'a', content: '被赞的' })
+    const second = createFakePost({ id: 'b', content: '不动的' })
+    store.posts = [first, second]
+
+    await store.toggleLike('a')
+
+    expect(mockedSetPostLiked).toHaveBeenCalledWith('a', true)
+    expect(store.posts.map((post) => post.id)).toEqual(['a', 'b'])
+    expect(store.posts[0]).toBe(liked)
+    expect(store.posts[1]).toBe(second)
+    expect(store.posts[0].likes).toBe(1)
+    expect(store.error).toBeNull()
+  })
+
+  it('toggleLike 已点赞时请求取消点赞', async () => {
+    mockedSetPostLiked.mockResolvedValue(createFakePost({ id: 'a', likes: 0, liked: false }))
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'a', likes: 1, liked: true })]
+
+    await store.toggleLike('a')
+
+    expect(mockedSetPostLiked).toHaveBeenCalledWith('a', false)
+  })
+
+  it('toggleLike 失败时写入 error 且条目保持不变', async () => {
+    mockedSetPostLiked.mockRejectedValue(new Error('动态不存在'))
+
+    const store = usePostsStore()
+    const original = createFakePost({ id: 'a' })
+    store.posts = [original]
+
+    await expect(store.toggleLike('a')).resolves.toBeUndefined()
+
+    expect(store.error).toBe('动态不存在')
+    expect(store.posts[0]).toBe(original)
+  })
+
+  it('请求进行中 reacting 标记该条目该动作，结束后清空', async () => {
+    const gate = deferred<Post>()
+    mockedSetPostLiked.mockReturnValue(gate.promise)
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'a' })]
+
+    const toggling = store.toggleLike('a')
+
+    expect(store.reacting).toBe('a:like')
+
+    gate.resolve(createFakePost({ id: 'a', likes: 1, liked: true }))
+    await toggling
+
+    expect(store.reacting).toBeNull()
+  })
+
+  it('请求进行中重复点击不会发出第二次请求', async () => {
+    const gate = deferred<Post>()
+    mockedSetPostLiked.mockReturnValue(gate.promise)
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'a' })]
+
+    const first = store.toggleLike('a')
+    await store.toggleLike('a')
+
+    expect(mockedSetPostLiked).toHaveBeenCalledTimes(1)
+
+    gate.resolve(createFakePost({ id: 'a', likes: 1, liked: true }))
+    await first
+
+    expect(store.posts[0].likes).toBe(1)
+    expect(store.reacting).toBeNull()
+  })
+
+  it('点赞不会触发全局 pending，页面不会出现同步提示', async () => {
+    const gate = deferred<Post>()
+    mockedSetPostLiked.mockReturnValue(gate.promise)
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'a' })]
+
+    const toggling = store.toggleLike('a')
+
+    expect(store.pending).toBe(false)
+
+    gate.resolve(createFakePost({ id: 'a', likes: 1, liked: true }))
+    await toggling
+
+    expect(store.pending).toBe(false)
+  })
+
+  it('id 不在列表里时不发请求', async () => {
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'a' })]
+
+    await store.toggleLike('missing')
+
+    expect(mockedSetPostLiked).not.toHaveBeenCalled()
+    expect(store.reacting).toBeNull()
+  })
+
+  it('toggleFavorite 用服务端返回的动态替换该条目', async () => {
+    const favorited = createFakePost({ id: 'a', favorited: true })
+    mockedSetPostFavorited.mockResolvedValue(favorited)
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'a' }), createFakePost({ id: 'b' })]
+
+    await store.toggleFavorite('a')
+
+    expect(mockedSetPostFavorited).toHaveBeenCalledWith('a', true)
+    expect(store.posts[0]).toBe(favorited)
+  })
+
+  it('toggleFavorite 失败时写入 error 且条目保持不变', async () => {
+    mockedSetPostFavorited.mockRejectedValue(new Error('网络异常，请检查连接后重试。'))
+
+    const store = usePostsStore()
+    const original = createFakePost({ id: 'a' })
+    store.posts = [original]
+
+    await store.toggleFavorite('a')
+
+    expect(store.error).toBe('网络异常，请检查连接后重试。')
+    expect(store.posts[0]).toBe(original)
+    expect(store.reacting).toBeNull()
+  })
+
+  it('favoriteCount 与 favorites 只统计已收藏的动态并保持原顺序', () => {
+    const store = usePostsStore()
+    store.posts = [
+      createFakePost({ id: 'a', content: '收藏一', favorited: true }),
+      createFakePost({ id: 'b', content: '没收藏' }),
+      createFakePost({ id: 'c', content: '收藏二', favorited: true }),
+    ]
+
+    expect(store.favoriteCount).toBe(2)
+    expect(store.favorites.map((post) => post.id)).toEqual(['a', 'c'])
   })
 
   it('setAuthor 去除空白并持久化', () => {
