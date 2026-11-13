@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { createApp } from './app'
-import { createPostRepository } from './repository'
+import { HTTPException } from 'hono/http-exception'
+import { createApp } from './app.js'
+import { createPostRepository } from './repository.js'
 
 function setup() {
   const repository = createPostRepository({
@@ -140,6 +141,65 @@ describe('POST /api/posts', () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: '昵称必须是字符串' })
   })
+
+  it('昵称恰好 16 字时允许创建', async () => {
+    const { app } = setup()
+    const author = '一'.repeat(16)
+
+    const response = await postJson(app, { author, content: '合法内容' })
+    const data = (await response.json()) as { post: { author: string } }
+
+    expect(response.status).toBe(201)
+    expect(data.post.author).toBe(author)
+  })
+
+  it('昵称超过 16 字时返回 400', async () => {
+    const { app } = setup()
+
+    const response = await postJson(app, { author: '一'.repeat(17), content: '合法内容' })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: '昵称不能超过 16 字' })
+  })
+
+  it('昵称只有空白时回落为匿名用户', async () => {
+    const { app } = setup()
+
+    const response = await postJson(app, { author: '     ', content: '合法内容' })
+    const data = (await response.json()) as { post: { author: string } }
+
+    expect(response.status).toBe(201)
+    expect(data.post.author).toBe('匿名用户')
+  })
+})
+
+describe('POST /api/posts 请求体大小', () => {
+  it('请求体超过 8KB 时返回 413 与 JSON 错误体', async () => {
+    const { app } = setup()
+
+    const response = await postJson(app, { content: '一'.repeat(3000) })
+
+    expect(response.status).toBe(413)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(await response.json()).toEqual({ error: '请求体过大' })
+  })
+
+  it('未超过 8KB 但内容超长时仍走 400 内容错误', async () => {
+    const { app } = setup()
+
+    const response = await postJson(app, { content: '一'.repeat(281) })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: '内容不能超过 280 字' })
+  })
+
+  it('超大请求体不会被仓储接收', async () => {
+    const { app, repository } = setup()
+
+    await postJson(app, { content: '一'.repeat(3000) })
+
+    expect(repository.size()).toBe(0)
+  })
 })
 
 describe('DELETE /api/posts/:id', () => {
@@ -204,5 +264,17 @@ describe('未知路径与异常', () => {
 
     expect(response.status).toBe(500)
     expect(data).toEqual({ error: '服务内部错误' })
+  })
+
+  it('HTTPException 保留自身状态码与响应体', async () => {
+    const { app } = setup()
+    app.get('/api/teapot', () => {
+      throw new HTTPException(418, { message: '被拒绝' })
+    })
+
+    const response = await app.request('/api/teapot')
+
+    expect(response.status).toBe(418)
+    expect(await response.text()).toBe('被拒绝')
   })
 })

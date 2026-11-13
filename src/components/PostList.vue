@@ -5,6 +5,8 @@ import PostItem from './PostItem.vue'
 defineProps<{
   posts: Post[]
   now: number
+  /** 是否有请求正在进行：透传给单条动态以禁用删除 */
+  busy?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +21,7 @@ const emit = defineEmits<{
       :key="post.id"
       :post="post"
       :now="now"
+      :busy="busy"
       @delete="emit('delete', $event)"
     />
   </ul>

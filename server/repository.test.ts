@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Post } from '../src/domain/post'
-import { createPostRepository } from './repository'
+import type { Post } from '../src/domain/post.js'
+import { createPostRepository } from './repository.js'
 
 function makePost(overrides: Partial<Post> = {}): Post {
   return {
@@ -42,6 +42,29 @@ describe('createPostRepository', () => {
     expect(repository.list()).toHaveLength(1)
     expect(repository.list()[0]!.id).toBe('post-1')
     expect(repository.list()).not.toBe(repository.list())
+  })
+
+  it('list 返回元素副本，修改返回值不会污染内部存储', () => {
+    const repository = createPostRepository()
+    repository.add(makePost())
+
+    const [first] = repository.list()
+    first!.content = '被外部篡改'
+    first!.author = '篡改者'
+
+    expect(repository.list()[0]).toEqual(makePost())
+    expect(repository.list()[0]).not.toBe(repository.list()[0])
+  })
+
+  it('add 存入副本，之后修改传入对象不会污染内部存储', () => {
+    const repository = createPostRepository()
+    const post = makePost()
+    repository.add(post)
+
+    post.content = '被外部篡改'
+    post.createdAt = 999
+
+    expect(repository.list()[0]).toEqual(makePost())
   })
 
   it('remove 命中时返回 true 并删除该条动态', () => {

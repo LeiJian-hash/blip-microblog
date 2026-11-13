@@ -20,8 +20,11 @@ onMounted(() => {
   void store.load()
 })
 
-async function handleSubmit(draft: PostDraft): Promise<void> {
-  await store.publish(draft)
+/** 返回是否发布成功，发布框据此决定要不要清空草稿 */
+async function handleSubmit(draft: PostDraft): Promise<boolean> {
+  const result = await store.publish(draft)
+
+  return result.ok
 }
 
 async function handleDelete(id: string): Promise<void> {
@@ -48,7 +51,7 @@ async function handleClear(): Promise<void> {
     </header>
 
     <main class="app-main">
-      <PostComposer :initial-author="author" @submit="handleSubmit" />
+      <PostComposer :initial-author="author" :busy="pending" @submit="handleSubmit" />
 
       <p v-if="error" class="alert" role="alert" data-testid="request-error">
         {{ error }}
@@ -57,7 +60,7 @@ async function handleClear(): Promise<void> {
 
       <section class="timeline" aria-label="动态列表">
         <h2 class="timeline-title">最新动态</h2>
-        <PostList :posts="posts" :now="now" @delete="handleDelete" />
+        <PostList :posts="posts" :now="now" :busy="pending" @delete="handleDelete" />
       </section>
     </main>
 
@@ -69,6 +72,7 @@ async function handleClear(): Promise<void> {
             type="button"
             class="link-button link-button--danger"
             data-testid="clear-confirm"
+            :disabled="pending"
             @click="handleClear"
           >
             确认清空
@@ -87,7 +91,7 @@ async function handleClear(): Promise<void> {
           type="button"
           class="link-button"
           data-testid="clear-all"
-          :disabled="count === 0"
+          :disabled="count === 0 || pending"
           @click="confirmingClear = true"
         >
           清空全部数据

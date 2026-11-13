@@ -1,11 +1,16 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
+import { HTTPException } from 'hono/http-exception'
 import type { PostDraft } from '../src/domain/post.js'
 import { createPost, normalizeDraft, validateDraft } from '../src/domain/post.js'
-import type { PostRepository } from './repository'
+import type { PostRepository } from './repository.js'
 
 export interface CreateAppOptions {
   repository: PostRepository
 }
+
+/** 请求体上限：超过即拒收，避免把几十 MB 的 body 读进内存后才校验 */
+const MAX_BODY_BYTES = 8 * 1024
 
 /** 把未知请求体收窄成可读的键值对象 */
 function toBody(payload: unknown): Record<string, unknown> {
@@ -21,6 +26,9 @@ export function createApp({ repository }: CreateAppOptions): Hono {
   // 统一的 JSON 兜底：未知路径与未捕获异常都不返回纯文本/堆栈
   app.notFound((c) => c.json({ error: '接口不存在' }, 404))
   app.onError((error, c) => {
+    // HTTPException 自带状态码与响应体（413 等），原样返回，不要改写成 500
+    if (error instanceof HTTPException) return error.getResponse()
+
     console.error('[blip] 处理请求时发生未捕获异常：', error)
     return c.json({ error: '服务内部错误' }, 500)
   })
@@ -29,35 +37,43 @@ export function createApp({ repository }: CreateAppOptions): Hono {
 
   app.get('/api/posts', (c) => c.json({ posts: repository.list() }))
 
-  app.post('/api/posts', async (c) => {
-    let payload: unknown
+  app.post(
+    '/api/posts',
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      // 默认实现返回纯文本 413，这里统一成 JSON 错误体
+      onError: (c) => c.json({ error: '请求体过大' }, 413),
+    }),
+    async (c) => {
+      let payload: unknown
 
-    try {
-      payload = await c.req.json()
-    } catch {
-      return c.json({ error: '请求体不是合法的 JSON' }, 400)
-    }
+      try {
+        payload = await c.req.json()
+      } catch {
+        return c.json({ error: '请求体不是合法的 JSON' }, 400)
+      }
 
-    const body = toBody(payload)
-    const rawContent = body.content
-    const rawAuthor = body.author
+      const body = toBody(payload)
+      const rawContent = body.content
+      const rawAuthor = body.author
 
-    if (typeof rawContent !== 'string') return c.json({ error: '内容不能为空' }, 400)
-    if (rawAuthor !== undefined && typeof rawAuthor !== 'string') {
-      return c.json({ error: '昵称必须是字符串' }, 400)
-    }
+      if (typeof rawContent !== 'string') return c.json({ error: '内容不能为空' }, 400)
+      if (rawAuthor !== undefined && typeof rawAuthor !== 'string') {
+        return c.json({ error: '昵称必须是字符串' }, 400)
+      }
 
-    const draft: PostDraft = { content: rawContent, author: rawAuthor ?? '' }
-    const normalized = normalizeDraft(draft)
-    const invalid = validateDraft(normalized)
+      const draft: PostDraft = { content: rawContent, author: rawAuthor ?? '' }
+      const normalized = normalizeDraft(draft)
+      const invalid = validateDraft(normalized)
 
-    if (invalid) return c.json({ error: invalid }, 400)
+      if (invalid) return c.json({ error: invalid }, 400)
 
-    const post = createPost(normalized, { id: repository.nextId(), now: repository.now() })
-    repository.add(post)
+      const post = createPost(normalized, { id: repository.nextId(), now: repository.now() })
+      repository.add(post)
 
-    return c.json({ post }, 201)
-  })
+      return c.json({ post }, 201)
+    },
+  )
 
   app.delete('/api/posts/:id', (c) => {
     const removed = repository.remove(c.req.param('id'))

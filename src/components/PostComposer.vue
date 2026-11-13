@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { MAX_CONTENT_LENGTH, validateDraft } from '@/domain/post'
+import { MAX_CONTENT_LENGTH, validateDraft, type PostDraft } from '@/domain/post'
 import { initialOf } from '@/utils/time'
 
 const props = defineProps<{
   /** 上次使用的昵称，作为输入框初值 */
   initialAuthor: string
-}>()
-
-const emit = defineEmits<{
-  submit: [draft: { content: string; author: string }]
+  /** 是否有请求正在进行：禁用发布并阻止重复提交 */
+  busy?: boolean
+  /** 提交草稿；返回 true 表示服务端已接受，此时才清空输入框 */
+  onSubmit: (draft: PostDraft) => Promise<boolean>
 }>()
 
 const WARNING_THRESHOLD = 40
@@ -29,14 +29,18 @@ const length = computed(() => content.value.length)
 const remaining = computed(() => MAX_CONTENT_LENGTH - length.value)
 const counterLabel = computed(() => `${length.value} / ${MAX_CONTENT_LENGTH}`)
 const isOverLimit = computed(() => remaining.value < 0)
-const canSubmit = computed(() => content.value.trim().length > 0 && !isOverLimit.value)
+const canSubmit = computed(
+  () => content.value.trim().length > 0 && !isOverLimit.value && !props.busy,
+)
 const authorInitial = computed(() => initialOf(author.value))
 const counterClasses = computed(() => ({
   'counter--warning': remaining.value <= WARNING_THRESHOLD && remaining.value >= 0,
   'counter--over': isOverLimit.value,
 }))
 
-function submitDraft(): void {
+async function submitDraft(): Promise<void> {
+  if (props.busy) return
+
   const draft = { content: content.value, author: author.value }
   const message = validateDraft(draft)
 
@@ -46,8 +50,14 @@ function submitDraft(): void {
   }
 
   error.value = null
-  emit('submit', { content: draft.content.trim(), author: draft.author.trim() })
-  content.value = ''
+
+  // 只有服务端接受后才清空，失败时保留草稿，用户不必重新输入
+  const accepted = await props.onSubmit({
+    content: draft.content.trim(),
+    author: draft.author.trim(),
+  })
+
+  if (accepted) content.value = ''
 }
 
 function clearError(): void {
@@ -57,7 +67,7 @@ function clearError(): void {
 function handleKeydown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
     event.preventDefault()
-    submitDraft()
+    void submitDraft()
   }
 }
 </script>

@@ -7,6 +7,8 @@ const props = defineProps<{
   post: Post
   /** 由父级统一提供的“当前时间”，保证列表内相对时间一致 */
   now: number
+  /** 是否有请求正在进行：禁用删除，避免重复提交 */
+  busy?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -47,6 +49,7 @@ function confirmDelete(): void {
               type="button"
               class="action action--danger"
               data-testid="post-delete-confirm"
+              :disabled="busy"
               @click="confirmDelete"
             >
               确认
@@ -65,6 +68,7 @@ function confirmDelete(): void {
             type="button"
             class="action"
             data-testid="post-delete"
+            :disabled="busy"
             @click="confirming = true"
           >
             删除
@@ -167,6 +171,11 @@ function confirmDelete(): void {
   color: var(--danger);
   border-color: rgba(255, 107, 107, 0.4);
   opacity: 1;
+}
+
+.action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .post-content {

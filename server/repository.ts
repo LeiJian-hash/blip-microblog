@@ -1,5 +1,5 @@
-import type { Post } from '../src/domain/post'
-import { createId } from '../src/domain/post'
+import type { Post } from '../src/domain/post.js'
+import { createId } from '../src/domain/post.js'
 
 export interface PostRepositoryOptions {
   /** 当前时间戳来源，默认 Date.now */
@@ -33,11 +33,12 @@ export function createPostRepository(options: PostRepositoryOptions = {}): PostR
 
   return {
     list() {
-      // 返回副本，避免外部改动污染内部数组
-      return [...posts]
+      // 数组与元素都返回副本，避免外部改动污染内部存储
+      return posts.map((post) => ({ ...post }))
     },
     add(post) {
-      posts.unshift(post)
+      // 存入副本，避免调用方之后修改原对象影响存储
+      posts.unshift({ ...post })
     },
     remove(id) {
       const index = posts.findIndex((post) => post.id === id)

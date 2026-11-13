@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, clearPosts, createPost, deletePost, fetchPosts } from './posts'
+import {
+  ApiError,
+  REQUEST_TIMEOUT_MS,
+  clearPosts,
+  createPost,
+  deletePost,
+  fetchPosts,
+} from './posts'
 
 const post = {
   id: 'p1',
@@ -163,5 +170,33 @@ describe('网络异常', () => {
 
     expect(error).toBeInstanceOf(ApiError)
     expect((error as Error).message).toBe('网络异常，请检查连接后重试。')
+  })
+
+  it('超时后中止请求并转换成可读中文错误', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const mock = vi.fn(
+        (_input: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            })
+          }),
+      )
+      vi.stubGlobal('fetch', mock)
+
+      const pending = fetchPosts().catch((cause: unknown) => cause)
+      // 让出一次微任务，确保 request 已经调用 fetch 并挂好中止监听
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+      const error = await pending
+
+      expect(mock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal)
+      expect(error).toBeInstanceOf(ApiError)
+      expect((error as Error).message).toBe('网络异常，请检查连接后重试。')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

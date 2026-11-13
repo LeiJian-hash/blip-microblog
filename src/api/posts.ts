@@ -15,6 +15,8 @@ export class ApiError extends Error {
 export const NETWORK_ERROR = '网络异常，请检查连接后重试。'
 /** 服务端响应无法解读时的兜底文案 */
 export const UNKNOWN_ERROR = '请求失败，请稍后重试。'
+/** 单个请求的超时时间，避免界面永久停在“正在同步…” */
+export const REQUEST_TIMEOUT_MS = 10_000
 
 const POSTS_ENDPOINT = '/api/posts'
 
@@ -36,14 +38,19 @@ async function readErrorMessage(response: Response): Promise<string> {
   }
 }
 
-/** 发起请求；网络异常与非 2xx 都转成 ApiError */
+/** 发起请求；网络异常、超时与非 2xx 都转成 ApiError */
 async function request(path: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   let response: Response
 
   try {
-    response = await fetch(path, init)
+    response = await fetch(path, { ...init, signal: controller.signal })
   } catch {
+    // 断网与主动中止（超时）都归入网络异常
     throw new ApiError(NETWORK_ERROR)
+  } finally {
+    clearTimeout(timer)
   }
 
   if (!response.ok) {

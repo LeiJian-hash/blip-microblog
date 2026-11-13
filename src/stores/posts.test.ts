@@ -1,16 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { MAX_CONTENT_LENGTH, type Post } from '@/domain/post'
-import { clearPosts, createPost, deletePost, fetchPosts } from '@/api/posts'
+import { ApiError, clearPosts, createPost, deletePost, fetchPosts } from '@/api/posts'
 import { AUTHOR_KEY } from '@/lib/storage'
 import { usePostsStore } from './posts'
 
-vi.mock('@/api/posts', () => ({
-  fetchPosts: vi.fn(),
-  createPost: vi.fn(),
-  deletePost: vi.fn(),
-  clearPosts: vi.fn(),
-}))
+// 只替换网络调用，保留 ApiError 等真实导出，便于断言错误类型
+vi.mock('@/api/posts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/posts')>()
+
+  return {
+    ...actual,
+    fetchPosts: vi.fn(),
+    createPost: vi.fn(),
+    deletePost: vi.fn(),
+    clearPosts: vi.fn(),
+  }
+})
 
 const mockedFetchPosts = vi.mocked(fetchPosts)
 const mockedCreatePost = vi.mocked(createPost)
@@ -231,6 +237,74 @@ describe('usePostsStore', () => {
 
     expect(store.posts).toHaveLength(1)
     expect(store.error).toBe('清空失败')
+  })
+
+  it('load 与 publish 交错时，迟到的旧快照不会覆盖刚发布的动态', async () => {
+    const gate = deferred<Post[]>()
+    mockedFetchPosts.mockReturnValue(gate.promise)
+    mockedCreatePost.mockResolvedValue(createFakePost({ id: 'new', content: '刚发布' }))
+
+    const store = usePostsStore()
+    const loading = store.load()
+
+    await store.publish({ content: '刚发布', author: '' })
+
+    // 首屏 GET 的快照里没有这条新动态，落地时不能把它冲掉
+    gate.resolve([createFakePost({ id: 'old', content: '旧的' })])
+    await loading
+
+    expect(store.posts.map((post) => post.id)).toEqual(['new'])
+    expect(store.error).toBeNull()
+  })
+
+  it('过期的 load 失败不覆盖更新请求的结果', async () => {
+    const store = usePostsStore()
+    mockedFetchPosts.mockRejectedValueOnce(new Error('第一次加载失败'))
+
+    const first = store.load()
+
+    mockedFetchPosts.mockResolvedValueOnce([createFakePost({ id: 'fresh' })])
+    const second = store.load()
+
+    await Promise.all([first, second])
+
+    expect(store.error).toBeNull()
+    expect(store.posts.map((post) => post.id)).toEqual(['fresh'])
+  })
+
+  it('并发请求期间 pending 保持为 true，全部结束才复位', async () => {
+    const publishGate = deferred<Post>()
+    const removeGate = deferred<void>()
+    mockedCreatePost.mockReturnValue(publishGate.promise)
+    mockedDeletePost.mockReturnValue(removeGate.promise)
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'drop' })]
+
+    const publishing = store.publish({ content: '你好', author: '' })
+    const removing = store.remove('drop')
+
+    expect(store.pending).toBe(true)
+
+    publishGate.resolve(createFakePost({ id: 'new' }))
+    await publishing
+    expect(store.pending).toBe(true)
+
+    removeGate.resolve()
+    await removing
+    expect(store.pending).toBe(false)
+  })
+
+  it('remove 遇到 404 时按幂等处理：移除本地条目且不报错', async () => {
+    mockedDeletePost.mockRejectedValue(new ApiError('动态不存在', 404))
+
+    const store = usePostsStore()
+    store.posts = [createFakePost({ id: 'gone' }), createFakePost({ id: 'keep' })]
+
+    await store.remove('gone')
+
+    expect(store.posts.map((post) => post.id)).toEqual(['keep'])
+    expect(store.error).toBeNull()
   })
 
   it('setAuthor 去除空白并持久化', () => {

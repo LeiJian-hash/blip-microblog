@@ -12,8 +12,8 @@ const post: Post = {
   createdAt: NOW - 5 * 60_000,
 }
 
-function mountItem(overrides: Partial<Post> = {}) {
-  return mount(PostItem, { props: { post: { ...post, ...overrides }, now: NOW } })
+function mountItem(overrides: Partial<Post> = {}, busy = false) {
+  return mount(PostItem, { props: { post: { ...post, ...overrides }, now: NOW, busy } })
 }
 
 describe('PostItem', () => {
@@ -71,5 +71,15 @@ describe('PostItem', () => {
     expect(wrapper.find('[data-testid="post-delete-confirm"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="post-delete"]').exists()).toBe(true)
     expect(wrapper.emitted('delete')).toBeUndefined()
+  })
+
+  it('请求进行中禁用删除，避免重复提交', async () => {
+    const wrapper = mountItem({}, true)
+
+    expect(wrapper.find('[data-testid="post-delete"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-testid="post-delete"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="post-delete-confirm"]').exists()).toBe(false)
   })
 })

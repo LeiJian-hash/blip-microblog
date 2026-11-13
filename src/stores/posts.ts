@@ -1,13 +1,16 @@
 import { computed, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import { normalizeDraft, validateDraft, type Post, type PostDraft } from '@/domain/post'
-import { clearPosts, createPost, deletePost, fetchPosts } from '@/api/posts'
+import { ApiError, clearPosts, createPost, deletePost, fetchPosts } from '@/api/posts'
 import { getBrowserStorage, readAuthor, writeAuthor } from '@/lib/storage'
 
 export type PublishResult = { ok: true; post: Post } | { ok: false; error: string }
 
 /** 兜底文案：服务端与网络错误已由 api 层翻译，这里只接住意外异常 */
 const UNKNOWN_ERROR = '操作失败，请稍后重试。'
+
+/** 服务端已经没有这条动态，删除按幂等处理 */
+const NOT_FOUND = 404
 
 /** 把任意异常收敛成可展示的中文文案 */
 function toMessage(cause: unknown): string {
@@ -24,12 +27,29 @@ export const usePostsStore = defineStore('posts', () => {
 
   const posts = shallowRef<Post[]>([])
   const author = shallowRef(storage ? readAuthor(storage) : '')
-  /** 是否有请求正在进行，供界面展示加载态与禁用操作 */
-  const pending = shallowRef(false)
   const error = shallowRef<string | null>(null)
+
+  /** 进行中的请求数：并发时不会因为先结束的那个提前收起加载态 */
+  const inflight = shallowRef(0)
+  const pending = computed(() => inflight.value > 0)
+
+  /**
+   * 写操作版本号与 load 序号：
+   * 首屏 GET 可能在发布/删除之后才落地，直接用旧快照覆盖会丢数据，所以落地前要核对。
+   */
+  let writeRevision = 0
+  let loadToken = 0
 
   const count = computed(() => posts.value.length)
   const isEmpty = computed(() => posts.value.length === 0)
+
+  function beginRequest(): void {
+    inflight.value += 1
+  }
+
+  function endRequest(): void {
+    inflight.value -= 1
+  }
 
   function setAuthor(name: string): void {
     author.value = name.trim()
@@ -44,17 +64,26 @@ export const usePostsStore = defineStore('posts', () => {
     if (trimmed && trimmed !== author.value) setAuthor(trimmed)
   }
 
-  /** 从服务端拉取全量动态 */
+  /** 从服务端拉取全量动态；若期间已有写操作或更新的 load，则丢弃这份过期快照 */
   async function load(): Promise<void> {
-    pending.value = true
+    const token = (loadToken += 1)
+    const revision = writeRevision
+
+    beginRequest()
     error.value = null
 
     try {
-      posts.value = await fetchPosts()
+      const remote = await fetchPosts()
+
+      const isStale = revision !== writeRevision || token !== loadToken
+      if (isStale) return
+
+      posts.value = remote
     } catch (cause) {
-      error.value = toMessage(cause)
+      // 已有更新的 load 在跑时，旧请求的失败不代表当前状态
+      if (token === loadToken) error.value = toMessage(cause)
     } finally {
-      pending.value = false
+      endRequest()
     }
   }
 
@@ -63,11 +92,12 @@ export const usePostsStore = defineStore('posts', () => {
     const message = validateDraft(draft)
     if (message) return { ok: false, error: message }
 
-    pending.value = true
+    beginRequest()
     error.value = null
 
     try {
       const post = await createPost(normalizeDraft(draft))
+      writeRevision += 1
       posts.value = [post, ...posts.value]
       rememberAuthor(draft.author)
 
@@ -78,37 +108,49 @@ export const usePostsStore = defineStore('posts', () => {
 
       return { ok: false, error: reason }
     } finally {
-      pending.value = false
+      endRequest()
     }
   }
 
-  /** 删除单条动态，成功后才更新本地列表 */
+  /** 删除单条动态；服务端已不存在时视为删除成功，避免列表里留下幽灵条目 */
   async function remove(id: string): Promise<void> {
-    pending.value = true
+    beginRequest()
     error.value = null
+
+    let removed = false
 
     try {
       await deletePost(id)
-      posts.value = posts.value.filter((post) => post.id !== id)
+      removed = true
     } catch (cause) {
-      error.value = toMessage(cause)
+      if (cause instanceof ApiError && cause.status === NOT_FOUND) {
+        removed = true
+      } else {
+        error.value = toMessage(cause)
+      }
     } finally {
-      pending.value = false
+      endRequest()
     }
+
+    if (!removed) return
+
+    writeRevision += 1
+    posts.value = posts.value.filter((post) => post.id !== id)
   }
 
   /** 清空全部动态，成功后才清空本地列表 */
   async function clear(): Promise<void> {
-    pending.value = true
+    beginRequest()
     error.value = null
 
     try {
       await clearPosts()
+      writeRevision += 1
       posts.value = []
     } catch (cause) {
       error.value = toMessage(cause)
     } finally {
-      pending.value = false
+      endRequest()
     }
   }
 

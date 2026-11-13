@@ -12,37 +12,44 @@ const fake = vi.hoisted(() => ({
   failLoad: false,
   failCreate: false,
   gate: null as Promise<void> | null,
+  createGate: null as Promise<void> | null,
   seq: 0,
 }))
 
-vi.mock('@/api/posts', () => ({
-  fetchPosts: vi.fn(async () => {
-    if (fake.gate) await fake.gate
-    if (fake.failLoad) throw new Error('无法连接到服务器，请稍后重试。')
+vi.mock('@/api/posts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/posts')>()
 
-    return fake.posts.map((post) => ({ ...post }))
-  }),
-  createPost: vi.fn(async (draft: { author: string; content: string }) => {
-    if (fake.failCreate) throw new Error('发布失败：服务暂时不可用。')
+  return {
+    ...actual,
+    fetchPosts: vi.fn(async () => {
+      if (fake.gate) await fake.gate
+      if (fake.failLoad) throw new Error('无法连接到服务器，请稍后重试。')
 
-    fake.seq += 1
-    const post: Post = {
-      id: `post-${fake.seq}`,
-      author: draft.author,
-      content: draft.content,
-      createdAt: Date.now(),
-    }
+      return fake.posts.map((post) => ({ ...post }))
+    }),
+    createPost: vi.fn(async (draft: { author: string; content: string }) => {
+      if (fake.createGate) await fake.createGate
+      if (fake.failCreate) throw new Error('发布失败：服务暂时不可用。')
 
-    fake.posts = [post, ...fake.posts]
-    return post
-  }),
-  deletePost: vi.fn(async (id: string) => {
-    fake.posts = fake.posts.filter((post) => post.id !== id)
-  }),
-  clearPosts: vi.fn(async () => {
-    fake.posts = []
-  }),
-}))
+      fake.seq += 1
+      const post: Post = {
+        id: `post-${fake.seq}`,
+        author: draft.author,
+        content: draft.content,
+        createdAt: Date.now(),
+      }
+
+      fake.posts = [post, ...fake.posts]
+      return post
+    }),
+    deletePost: vi.fn(async (id: string) => {
+      fake.posts = fake.posts.filter((post) => post.id !== id)
+    }),
+    clearPosts: vi.fn(async () => {
+      fake.posts = []
+    }),
+  }
+})
 
 function seedPosts(posts: Post[]): void {
   fake.posts = posts
@@ -72,6 +79,7 @@ describe('App', () => {
     fake.failLoad = false
     fake.failCreate = false
     fake.gate = null
+    fake.createGate = null
     fake.seq = 0
     vi.clearAllMocks()
   })
@@ -147,6 +155,32 @@ describe('App', () => {
 
     expect(wrapper.findAll('[data-testid="post"]')).toHaveLength(0)
     expect(wrapper.find('[data-testid="request-error"]').text()).toBe('发布失败：服务暂时不可用。')
+    // 草稿保留在输入框里，用户重试不必重新打字
+    expect(
+      (wrapper.find('[data-testid="composer-content"]').element as HTMLTextAreaElement).value,
+    ).toBe('会失败的内容')
+  })
+
+  it('发布请求进行中禁用发布与清空，避免重复提交', async () => {
+    const wrapper = await mountApp()
+    let release!: () => void
+    fake.createGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    await wrapper.find('[data-testid="composer-content"]').setValue('提交中')
+    await wrapper.find('[data-testid="composer-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="composer-submit"]').attributes('disabled')).toBeDefined()
+
+    release()
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="post"]')).toHaveLength(1)
+    expect(
+      (wrapper.find('[data-testid="composer-content"]').element as HTMLTextAreaElement).value,
+    ).toBe('')
   })
 
   it('加载失败时展示接口错误文案', async () => {
