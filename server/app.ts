@@ -18,6 +18,13 @@ function toBody(payload: unknown): Record<string, unknown> {
 export function createApp({ repository }: CreateAppOptions): Hono {
   const app = new Hono()
 
+  // 统一的 JSON 兜底：未知路径与未捕获异常都不返回纯文本/堆栈
+  app.notFound((c) => c.json({ error: '接口不存在' }, 404))
+  app.onError((error, c) => {
+    console.error('[blip] 处理请求时发生未捕获异常：', error)
+    return c.json({ error: '服务内部错误' }, 500)
+  })
+
   app.get('/api/health', (c) => c.json({ status: 'ok' }))
 
   app.get('/api/posts', (c) => c.json({ posts: repository.list() }))

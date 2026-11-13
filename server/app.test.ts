@@ -181,3 +181,28 @@ describe('DELETE /api/posts', () => {
     expect(data.posts).toEqual([])
   })
 })
+
+describe('未知路径与异常', () => {
+  it('未定义的 API 路径返回 JSON 404', async () => {
+    const { app } = setup()
+
+    const response = await app.request('/api/unknown')
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(await response.json()).toEqual({ error: '接口不存在' })
+  })
+
+  it('路由内部抛错时返回 JSON 500，而不是泄漏堆栈', async () => {
+    const { app } = setup()
+    app.get('/api/boom', () => {
+      throw new Error('内部错误细节')
+    })
+
+    const response = await app.request('/api/boom')
+    const data = (await response.json()) as { error: string }
+
+    expect(response.status).toBe(500)
+    expect(data).toEqual({ error: '服务内部错误' })
+  })
+})

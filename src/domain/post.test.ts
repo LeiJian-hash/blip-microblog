@@ -5,7 +5,6 @@ import {
   createPost,
   isPost,
   normalizeDraft,
-  parseStoredPosts,
   validateDraft,
 } from './post'
 
@@ -98,32 +97,4 @@ describe('isPost', () => {
   })
 })
 
-describe('parseStoredPosts', () => {
-  it('保留合法记录并过滤异常记录', () => {
-    const parsed = parseStoredPosts([
-      validPost,
-      null,
-      { id: 'broken' },
-      { ...validPost, id: 42 },
-      'string',
-      { ...validPost, content: '第二条', createdAt: 1_700_000_000_001 },
-    ])
 
-    expect(parsed).toHaveLength(2)
-    expect(parsed.map((post) => post.content)).toEqual(['第一条动态', '第二条'])
-  })
-
-  it('非数组输入返回空数组', () => {
-    expect(parseStoredPosts(null)).toEqual([])
-    expect(parseStoredPosts('oops')).toEqual([])
-    expect(parseStoredPosts({ posts: [] })).toEqual([])
-  })
-
-  it('保持存储中的原始顺序', () => {
-    const parsed = parseStoredPosts([
-      { ...validPost, id: 'b', createdAt: 2 },
-      { ...validPost, id: 'a', createdAt: 1 },
-    ])
-    expect(parsed.map((post) => post.id)).toEqual(['b', 'a'])
-  })
-})

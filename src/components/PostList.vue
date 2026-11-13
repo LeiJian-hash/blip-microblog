@@ -26,7 +26,9 @@ const emit = defineEmits<{
   <div v-else class="empty-state" data-testid="empty-state">
     <div class="empty-icon" aria-hidden="true">✎</div>
     <p class="empty-title">还没有任何动态</p>
-    <p class="empty-hint">在上面写下第一句话，它会保存在本机的 Local Storage 里。</p>
+    <p class="empty-hint" data-testid="empty-hint">
+      在上面写下第一句话，它会保存到服务端。
+    </p>
   </div>
 </template>
 

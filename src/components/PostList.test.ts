@@ -18,6 +18,14 @@ describe('PostList', () => {
     expect(wrapper.findAll('[data-testid="post"]')).toHaveLength(0)
   })
 
+  it('空状态提示数据保存在服务端，而不是浏览器', () => {
+    const wrapper = mount(PostList, { props: { posts: [], now: NOW } })
+    const hint = wrapper.find('[data-testid="empty-hint"]').text()
+
+    expect(hint).toContain('保存到服务端')
+    expect(hint).not.toContain('Local Storage')
+  })
+
   it('按传入顺序渲染全部动态', () => {
     const wrapper = mount(PostList, { props: { posts, now: NOW } })
     const items = wrapper.findAll('[data-testid="post"]')

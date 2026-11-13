@@ -69,10 +69,3 @@ export function isPost(value: unknown): value is Post {
     Number.isFinite(candidate.createdAt)
   )
 }
-
-/** 解析存储中的动态数组，过滤掉结构异常的记录 */
-export function parseStoredPosts(raw: unknown): Post[] {
-  if (!Array.isArray(raw)) return []
-
-  return raw.filter(isPost)
-}
