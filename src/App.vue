@@ -8,12 +8,19 @@ import { useNow } from './composables/useNow'
 import type { PostDraft } from './domain/post'
 
 const store = usePostsStore()
-const { posts, author, count, pending, error } = storeToRefs(store)
+const { posts, author, count, pending, error, reacting, favoriteCount, favorites } =
+  storeToRefs(store)
 const now = useNow()
 
 const confirmingClear = shallowRef(false)
+/** 是否只看已收藏的动态 */
+const onlyFavorites = shallowRef(false)
 
 const countLabel = computed(() => `${count.value} 条动态`)
+const favoriteLabel = computed(() => `收藏 ${favoriteCount.value}`)
+const visiblePosts = computed(() => (onlyFavorites.value ? favorites.value : posts.value))
+/** 筛选状态下没有任何收藏时，需要与「还没有任何动态」区分开的空态 */
+const showFavoritesEmpty = computed(() => onlyFavorites.value && visiblePosts.value.length === 0)
 
 onMounted(() => {
   // 首屏数据来自服务端；不 await，避免 mount 阶段阻塞渲染
@@ -26,6 +33,18 @@ async function handleSubmit(draft: PostDraft): Promise<void> {
 
 async function handleDelete(id: string): Promise<void> {
   await store.remove(id)
+}
+
+async function handleLike(id: string): Promise<void> {
+  await store.toggleLike(id)
+}
+
+async function handleFavorite(id: string): Promise<void> {
+  await store.toggleFavorite(id)
+}
+
+function toggleFavoritesFilter(): void {
+  onlyFavorites.value = !onlyFavorites.value
 }
 
 async function handleClear(): Promise<void> {
@@ -56,8 +75,40 @@ async function handleClear(): Promise<void> {
       <p v-if="pending" class="status" data-testid="loading">正在同步…</p>
 
       <section class="timeline" aria-label="动态列表">
-        <h2 class="timeline-title">最新动态</h2>
-        <PostList :posts="posts" :now="now" @delete="handleDelete" />
+        <div class="timeline-head">
+          <h2 class="timeline-title">最新动态</h2>
+          <button
+            type="button"
+            class="filter-button"
+            :class="{ 'filter-button--on': onlyFavorites }"
+            data-testid="favorites-filter"
+            :aria-pressed="onlyFavorites"
+            @click="toggleFavoritesFilter"
+          >
+            <span class="filter-icon" aria-hidden="true">{{ onlyFavorites ? '★' : '☆' }}</span>
+            {{ favoriteLabel }}
+          </button>
+        </div>
+
+        <div
+          v-if="showFavoritesEmpty"
+          class="favorites-empty"
+          data-testid="favorites-empty"
+        >
+          <div class="favorites-empty-icon" aria-hidden="true">☆</div>
+          <p class="favorites-empty-title">还没有收藏任何动态</p>
+          <p class="favorites-empty-hint">点一下任意动态上的「收藏」，它就会出现在这里。</p>
+        </div>
+
+        <PostList
+          v-else
+          :posts="visiblePosts"
+          :now="now"
+          :reacting="reacting"
+          @delete="handleDelete"
+          @like="handleLike"
+          @favorite="handleFavorite"
+        />
       </section>
     </main>
 
@@ -174,12 +225,87 @@ async function handleClear(): Promise<void> {
   margin-top: 28px;
 }
 
+.timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .timeline-title {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.filter-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.filter-button:hover {
+  color: var(--text);
+  border-color: rgba(139, 149, 167, 0.5);
+  background: var(--surface-hover);
+}
+
+.filter-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.filter-button--on {
+  border-color: rgba(255, 194, 71, 0.45);
+  background: rgba(255, 194, 71, 0.12);
+  color: #ffc247;
+}
+
+.filter-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.favorites-empty {
+  padding: 32px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+}
+
+.favorites-empty-icon {
+  margin-bottom: 8px;
+  font-size: 24px;
+  color: #ffc247;
+}
+
+.favorites-empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.favorites-empty-hint {
+  margin: 6px 0 0;
+  font-size: 13px;
   color: var(--text-dim);
 }
 

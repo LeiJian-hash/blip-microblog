@@ -1,7 +1,14 @@
 import { computed, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import { normalizeDraft, validateDraft, type Post, type PostDraft } from '@/domain/post'
-import { clearPosts, createPost, deletePost, fetchPosts } from '@/api/posts'
+import {
+  clearPosts,
+  createPost,
+  deletePost,
+  fetchPosts,
+  setPostFavorited,
+  setPostLiked,
+} from '@/api/posts'
 import { getBrowserStorage, readAuthor, writeAuthor } from '@/lib/storage'
 
 export type PublishResult = { ok: true; post: Post } | { ok: false; error: string }
@@ -27,9 +34,18 @@ export const usePostsStore = defineStore('posts', () => {
   /** 是否有请求正在进行，供界面展示加载态与禁用操作 */
   const pending = shallowRef(false)
   const error = shallowRef<string | null>(null)
+  /**
+   * 正在请求中的互动动作，键为 `${id}:like` / `${id}:favorite`。
+   * 只影响对应条目的按钮，不复用 pending，避免出现全局「正在同步…」。
+   */
+  const reacting = shallowRef<string | null>(null)
 
   const count = computed(() => posts.value.length)
   const isEmpty = computed(() => posts.value.length === 0)
+  /** 已收藏的条数，供筛选入口展示 */
+  const favoriteCount = computed(() => posts.value.filter((post) => post.favorited).length)
+  /** 已收藏的动态，保持与主列表一致的顺序 */
+  const favorites = computed(() => posts.value.filter((post) => post.favorited))
 
   function setAuthor(name: string): void {
     author.value = name.trim()
@@ -112,17 +128,59 @@ export const usePostsStore = defineStore('posts', () => {
     }
   }
 
+  /**
+   * 点赞 / 收藏的共用流程：取反 → 请求 → 只替换该条目。
+   * 计数以服务端返回为准；失败只记录错误，不动本地状态。
+   */
+  async function toggleReaction(id: string, action: 'like' | 'favorite'): Promise<void> {
+    const current = posts.value.find((post) => post.id === id)
+    if (!current) return
+
+    // 同一条目的动作进行中时忽略重复点击，避免并发写同一个状态
+    if (reacting.value?.startsWith(`${id}:`)) return
+
+    const key = `${id}:${action}`
+    reacting.value = key
+    error.value = null
+
+    try {
+      const updated =
+        action === 'like'
+          ? await setPostLiked(id, !current.liked)
+          : await setPostFavorited(id, !current.favorited)
+
+      posts.value = posts.value.map((post) => (post.id === id ? updated : post))
+    } catch (cause) {
+      error.value = toMessage(cause)
+    } finally {
+      if (reacting.value === key) reacting.value = null
+    }
+  }
+
+  function toggleLike(id: string): Promise<void> {
+    return toggleReaction(id, 'like')
+  }
+
+  function toggleFavorite(id: string): Promise<void> {
+    return toggleReaction(id, 'favorite')
+  }
+
   return {
     posts,
     author,
     pending,
     error,
+    reacting,
     count,
     isEmpty,
+    favoriteCount,
+    favorites,
     load,
     publish,
     remove,
     clear,
+    toggleLike,
+    toggleFavorite,
     setAuthor,
   }
 })

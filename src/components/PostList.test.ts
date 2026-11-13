@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PostList from './PostList.vue'
-import type { Post } from '@/domain/post'
+import { EMPTY_REACTIONS, type Post } from '@/domain/post'
 
 const NOW = new Date('2026-11-13T10:00:00+08:00').getTime()
 
 const posts: Post[] = [
-  { id: 'p2', author: '阿蓝', content: '新的', createdAt: NOW - 60_000 },
-  { id: 'p1', author: '小明', content: '旧的', createdAt: NOW - 2 * 3600_000 },
+  { id: 'p2', author: '阿蓝', content: '新的', createdAt: NOW - 60_000, ...EMPTY_REACTIONS },
+  { id: 'p1', author: '小明', content: '旧的', createdAt: NOW - 2 * 3600_000, ...EMPTY_REACTIONS },
 ]
 
 describe('PostList', () => {
@@ -43,5 +43,51 @@ describe('PostList', () => {
     await wrapper.findAll('[data-testid="post-delete-confirm"]')[0].trigger('click')
 
     expect(wrapper.emitted('delete')).toEqual([['p2']])
+  })
+
+  it('转发子组件的点赞事件', async () => {
+    const wrapper = mount(PostList, { props: { posts, now: NOW } })
+
+    await wrapper.findAll('[data-testid="post-like"]')[1].trigger('click')
+
+    expect(wrapper.emitted('like')).toEqual([['p1']])
+  })
+
+  it('转发子组件的收藏事件', async () => {
+    const wrapper = mount(PostList, { props: { posts, now: NOW } })
+
+    await wrapper.findAll('[data-testid="post-favorite"]')[0].trigger('click')
+
+    expect(wrapper.emitted('favorite')).toEqual([['p2']])
+  })
+
+  it('reacting 命中 `${id}:like` 时只禁用该条目的点赞按钮', () => {
+    const wrapper = mount(PostList, { props: { posts, now: NOW, reacting: 'p2:like' } })
+    const likes = wrapper.findAll('[data-testid="post-like"]')
+    const favorites = wrapper.findAll('[data-testid="post-favorite"]')
+
+    expect(likes[0].attributes('disabled')).toBeDefined()
+    expect(likes[1].attributes('disabled')).toBeUndefined()
+    expect(favorites[0].attributes('disabled')).toBeUndefined()
+  })
+
+  it('reacting 命中 `${id}:favorite` 时只禁用该条目的收藏按钮', () => {
+    const wrapper = mount(PostList, { props: { posts, now: NOW, reacting: 'p1:favorite' } })
+    const likes = wrapper.findAll('[data-testid="post-like"]')
+    const favorites = wrapper.findAll('[data-testid="post-favorite"]')
+
+    expect(favorites[1].attributes('disabled')).toBeDefined()
+    expect(likes[1].attributes('disabled')).toBeUndefined()
+    expect(favorites[0].attributes('disabled')).toBeUndefined()
+  })
+
+  it('没有进行中的互动时所有按钮都可点击', () => {
+    const wrapper = mount(PostList, { props: { posts, now: NOW, reacting: null } })
+
+    const disabled = wrapper
+      .findAll('[data-testid="post-like"], [data-testid="post-favorite"]')
+      .filter((button) => button.attributes('disabled') !== undefined)
+
+    expect(disabled).toHaveLength(0)
   })
 })

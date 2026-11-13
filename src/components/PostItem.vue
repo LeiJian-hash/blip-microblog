@@ -3,14 +3,21 @@ import { computed, shallowRef } from 'vue'
 import type { Post } from '@/domain/post'
 import { formatAbsoluteTime, formatRelativeTime, initialOf } from '@/utils/time'
 
-const props = defineProps<{
-  post: Post
-  /** 由父级统一提供的“当前时间”，保证列表内相对时间一致 */
-  now: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    post: Post
+    /** 由父级统一提供的“当前时间”，保证列表内相对时间一致 */
+    now: number
+    /** 该条目正在进行中的互动动作，用于禁用对应按钮 */
+    busy?: 'like' | 'favorite' | null
+  }>(),
+  { busy: null },
+)
 
 const emit = defineEmits<{
   delete: [id: string]
+  like: [id: string]
+  favorite: [id: string]
 }>()
 
 const confirming = shallowRef(false)
@@ -22,6 +29,14 @@ const isoTime = computed(() => new Date(props.post.createdAt).toISOString())
 
 function confirmDelete(): void {
   emit('delete', props.post.id)
+}
+
+function toggleLike(): void {
+  emit('like', props.post.id)
+}
+
+function toggleFavorite(): void {
+  emit('favorite', props.post.id)
 }
 </script>
 
@@ -73,6 +88,36 @@ function confirmDelete(): void {
       </div>
 
       <p class="post-content" data-testid="post-content">{{ post.content }}</p>
+
+      <div class="post-reactions">
+        <button
+          type="button"
+          class="reaction reaction--like"
+          :class="{ 'reaction--on': post.liked }"
+          data-testid="post-like"
+          :aria-pressed="post.liked"
+          :aria-label="post.liked ? '取消点赞' : '点赞'"
+          :disabled="busy === 'like'"
+          @click="toggleLike"
+        >
+          <span class="reaction-icon" aria-hidden="true">{{ post.liked ? '♥' : '♡' }}</span>
+          <span class="reaction-count" data-testid="post-like-count">{{ post.likes }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="reaction reaction--favorite"
+          :class="{ 'reaction--on': post.favorited }"
+          data-testid="post-favorite"
+          :aria-pressed="post.favorited"
+          :aria-label="post.favorited ? '取消收藏' : '收藏'"
+          :disabled="busy === 'favorite'"
+          @click="toggleFavorite"
+        >
+          <span class="reaction-icon" aria-hidden="true">{{ post.favorited ? '★' : '☆' }}</span>
+          <span>{{ post.favorited ? '已收藏' : '收藏' }}</span>
+        </button>
+      </div>
     </div>
   </li>
 </template>
@@ -178,6 +223,72 @@ function confirmDelete(): void {
   overflow-wrap: anywhere;
 }
 
+.post-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* 互动按钮始终可见，不依赖 hover */
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.reaction:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(139, 149, 167, 0.5);
+  background: var(--surface-hover);
+}
+
+.reaction:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.reaction:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.reaction-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.reaction-icon,
+.reaction-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.reaction--like.reaction--on {
+  border-color: rgba(255, 122, 156, 0.45);
+  background: rgba(255, 122, 156, 0.12);
+  color: #ff7a9c;
+}
+
+.reaction--favorite.reaction--on {
+  border-color: rgba(255, 194, 71, 0.45);
+  background: rgba(255, 194, 71, 0.12);
+  color: #ffc247;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -192,6 +303,11 @@ function confirmDelete(): void {
 @media (max-width: 520px) {
   .action {
     opacity: 1;
+  }
+
+  .reaction {
+    padding: 6px 13px;
+    font-size: 13px;
   }
 }
 </style>

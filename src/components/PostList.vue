@@ -2,14 +2,31 @@
 import type { Post } from '@/domain/post'
 import PostItem from './PostItem.vue'
 
-defineProps<{
-  posts: Post[]
-  now: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    posts: Post[]
+    now: number
+    /** 正在进行中的互动动作，键为 `${id}:like` / `${id}:favorite` */
+    reacting?: string | null
+  }>(),
+  { reacting: null },
+)
 
 const emit = defineEmits<{
   delete: [id: string]
+  like: [id: string]
+  favorite: [id: string]
 }>()
+
+/** 把全局的 reacting 键解析成单条动态的 busy 动作 */
+function busyOf(id: string): 'like' | 'favorite' | null {
+  const key = props.reacting
+  if (!key || !key.startsWith(`${id}:`)) return null
+
+  const action = key.slice(id.length + 1)
+
+  return action === 'like' || action === 'favorite' ? action : null
+}
 </script>
 
 <template>
@@ -19,7 +36,10 @@ const emit = defineEmits<{
       :key="post.id"
       :post="post"
       :now="now"
+      :busy="busyOf(post.id)"
       @delete="emit('delete', $event)"
+      @like="emit('like', $event)"
+      @favorite="emit('favorite', $event)"
     />
   </ul>
 

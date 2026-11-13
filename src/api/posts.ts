@@ -95,3 +95,32 @@ export async function deletePost(id: string): Promise<void> {
 export async function clearPosts(): Promise<void> {
   await request(POSTS_ENDPOINT, { method: 'DELETE' })
 }
+
+/**
+ * 切换某条动态的互动状态（点赞 / 收藏）。
+ * 成功响应里带着更新后的完整动态，计数一律以服务端为准。
+ */
+async function toggleReaction(
+  id: string,
+  action: 'like' | 'favorite',
+  on: boolean,
+): Promise<Post> {
+  const response = await request(`${POSTS_ENDPOINT}/${encodeURIComponent(id)}/${action}`, {
+    method: on ? 'PUT' : 'DELETE',
+  })
+  const data = await readJson<{ post?: unknown }>(response)
+
+  if (!isPost(data?.post)) throw new ApiError(UNKNOWN_ERROR, response.status)
+
+  return data.post
+}
+
+/** 点赞（on 为 true）或取消点赞（on 为 false），幂等 */
+export async function setPostLiked(id: string, liked: boolean): Promise<Post> {
+  return toggleReaction(id, 'like', liked)
+}
+
+/** 收藏（on 为 true）或取消收藏（on 为 false），幂等 */
+export async function setPostFavorited(id: string, favorited: boolean): Promise<Post> {
+  return toggleReaction(id, 'favorite', favorited)
+}
