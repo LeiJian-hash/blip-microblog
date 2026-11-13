@@ -1,27 +1,35 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import PostComposer from './components/PostComposer.vue'
 import PostList from './components/PostList.vue'
 import { usePostsStore } from './stores/posts'
 import { useNow } from './composables/useNow'
+import type { PostDraft } from './domain/post'
 
 const store = usePostsStore()
-const { posts, author, count, storageError } = storeToRefs(store)
+const { posts, author, count, pending, error } = storeToRefs(store)
 const now = useNow()
 
-const publishError = shallowRef<string | null>(null)
 const confirmingClear = shallowRef(false)
 
 const countLabel = computed(() => `${count.value} 条动态`)
 
-function handleSubmit(draft: { content: string; author: string }): void {
-  const result = store.publish(draft)
-  publishError.value = result.ok ? null : result.error
+onMounted(() => {
+  // 首屏数据来自服务端；不 await，避免 mount 阶段阻塞渲染
+  void store.load()
+})
+
+async function handleSubmit(draft: PostDraft): Promise<void> {
+  await store.publish(draft)
 }
 
-function handleClear(): void {
-  store.clear()
+async function handleDelete(id: string): Promise<void> {
+  await store.remove(id)
+}
+
+async function handleClear(): Promise<void> {
+  await store.clear()
   confirmingClear.value = false
 }
 </script>
@@ -33,7 +41,7 @@ function handleClear(): void {
         <div class="brand-mark" aria-hidden="true">B</div>
         <div class="brand-text">
           <h1 class="brand-title">Blip</h1>
-          <p class="brand-subtitle">本地微动态 · 数据只存在这台设备上</p>
+          <p class="brand-subtitle">极简微动态 · 数据保存在服务端</p>
         </div>
       </div>
       <span class="count-badge" data-testid="post-count">{{ countLabel }}</span>
@@ -42,21 +50,19 @@ function handleClear(): void {
     <main class="app-main">
       <PostComposer :initial-author="author" @submit="handleSubmit" />
 
-      <p v-if="publishError" class="alert" role="alert" data-testid="publish-error">
-        {{ publishError }}
+      <p v-if="error" class="alert" role="alert" data-testid="request-error">
+        {{ error }}
       </p>
-      <p v-if="storageError" class="alert" role="alert" data-testid="storage-alert">
-        {{ storageError }}
-      </p>
+      <p v-if="pending" class="status" data-testid="loading">正在同步…</p>
 
       <section class="timeline" aria-label="动态列表">
         <h2 class="timeline-title">最新动态</h2>
-        <PostList :posts="posts" :now="now" @delete="store.remove" />
+        <PostList :posts="posts" :now="now" @delete="handleDelete" />
       </section>
     </main>
 
     <footer class="app-footer">
-      <span class="footer-note">Vue 3 · Pinia · Local Storage</span>
+      <span class="footer-note">Vue 3 · Pinia · Hono</span>
       <div class="footer-actions">
         <template v-if="confirmingClear">
           <button
@@ -156,6 +162,12 @@ function handleClear(): void {
   background: rgba(255, 107, 107, 0.1);
   color: #ff9b9b;
   font-size: 13px;
+}
+
+.status {
+  margin: 12px 2px 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
 }
 
 .timeline {

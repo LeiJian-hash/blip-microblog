@@ -1,14 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  AUTHOR_KEY,
-  POSTS_KEY,
-  getBrowserStorage,
-  readAuthor,
-  readPosts,
-  writeAuthor,
-  writePosts,
-  type StorageLike,
-} from './storage'
+import { AUTHOR_KEY, getBrowserStorage, readAuthor, writeAuthor, type StorageLike } from './storage'
 
 function createFakeStorage(overrides: Partial<StorageLike> = {}): StorageLike {
   const map = new Map<string, string>()
@@ -23,13 +14,6 @@ function createFakeStorage(overrides: Partial<StorageLike> = {}): StorageLike {
     },
     ...overrides,
   }
-}
-
-const post = {
-  id: 'p1',
-  author: '阿蓝',
-  content: '你好',
-  createdAt: 1_700_000_000_000,
 }
 
 describe('getBrowserStorage', () => {
@@ -53,43 +37,6 @@ describe('getBrowserStorage', () => {
   })
 })
 
-describe('readPosts / writePosts', () => {
-  it('写入后可读回', () => {
-    const storage = createFakeStorage()
-    expect(writePosts([post], storage)).toBe(true)
-    expect(readPosts(storage)).toEqual([post])
-    expect(storage.getItem(POSTS_KEY)).toContain('你好')
-  })
-
-  it('没有数据时返回空数组', () => {
-    expect(readPosts(createFakeStorage())).toEqual([])
-  })
-
-  it('JSON 损坏时返回空数组', () => {
-    const storage = createFakeStorage({ getItem: () => '{oops' })
-    expect(readPosts(storage)).toEqual([])
-  })
-
-  it('存储的不是数组时返回空数组', () => {
-    const storage = createFakeStorage({ getItem: () => '{"posts":[]}' })
-    expect(readPosts(storage)).toEqual([])
-  })
-
-  it('无存储可用时写入返回 false', () => {
-    expect(writePosts([post], null)).toBe(false)
-    expect(readPosts(null)).toEqual([])
-  })
-
-  it('写入抛错时返回 false 而不抛出', () => {
-    const storage = createFakeStorage({
-      setItem: () => {
-        throw new Error('quota')
-      },
-    })
-    expect(writePosts([post], storage)).toBe(false)
-  })
-})
-
 describe('readAuthor / writeAuthor', () => {
   it('写入后可读回', () => {
     const storage = createFakeStorage()
@@ -105,5 +52,15 @@ describe('readAuthor / writeAuthor', () => {
 
   it('无存储可用时写入返回 false', () => {
     expect(writeAuthor('阿蓝', null)).toBe(false)
+  })
+
+  it('写入抛错时返回 false 而不抛出', () => {
+    const storage = createFakeStorage({
+      setItem: () => {
+        throw new Error('quota')
+      },
+    })
+
+    expect(writeAuthor('阿蓝', storage)).toBe(false)
   })
 })

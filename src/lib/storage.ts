@@ -1,6 +1,3 @@
-import { parseStoredPosts, type Post } from '@/domain/post'
-
-export const POSTS_KEY = 'blip.posts.v1'
 export const AUTHOR_KEY = 'blip.author.v1'
 
 const PROBE_KEY = '__blip_storage_probe__'
@@ -33,33 +30,6 @@ export function getBrowserStorage(
     return candidate
   } catch {
     return null
-  }
-}
-
-export function readPosts(storage: StorageLike | null = getBrowserStorage()): Post[] {
-  if (!storage) return []
-
-  try {
-    const raw = storage.getItem(POSTS_KEY)
-    if (!raw) return []
-
-    return parseStoredPosts(JSON.parse(raw))
-  } catch {
-    return []
-  }
-}
-
-export function writePosts(
-  posts: Post[],
-  storage: StorageLike | null = getBrowserStorage(),
-): boolean {
-  if (!storage) return false
-
-  try {
-    storage.setItem(POSTS_KEY, JSON.stringify(posts))
-    return true
-  } catch {
-    return false
   }
 }
 
